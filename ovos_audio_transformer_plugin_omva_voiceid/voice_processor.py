@@ -134,6 +134,23 @@ class OMVAVoiceProcessor:
 
         return audio_data
 
+    def retrieve_audio_tensor(self, audio_data: torch.Tensor) -> Optional[torch.Tensor]:
+        """
+        Convert raw audio bytes to a PyTorch tensor.
+
+        Args:
+            audio_data: Raw audio bytes
+
+        Returns:
+            PyTorch tensor or None if conversion fails
+        """
+        try:
+            return self._prepare_audio_tensor(audio_data)
+        except Exception as e:
+            LOG.error(f"Failed to convert audio data to tensor: {e}")
+
+        return None
+
     def extract_embedding(self, audio_tensor: torch.Tensor) -> Optional[torch.Tensor]:
         """
         Extract speaker embedding from audio using SpeechBrain
@@ -207,6 +224,10 @@ class OMVAVoiceProcessor:
                 # ).item()
 
                 similarity = self.similarity(query_norm, stored_norm)
+
+                # Convert to scalar if tensor
+                if isinstance(similarity, torch.Tensor):
+                    similarity = similarity.item()
 
                 LOG.debug(f"Similarity with {user_id}: {similarity:.3f}")
 
@@ -352,6 +373,10 @@ class OMVAVoiceProcessor:
             # ).item()
 
             score = self.similarity(emb1_norm, emb2_norm)
+
+            # Convert to scalar if tensor
+            if isinstance(score, torch.Tensor):
+                score = score.item()
 
             is_same = score >= self.confidence_threshold
 
