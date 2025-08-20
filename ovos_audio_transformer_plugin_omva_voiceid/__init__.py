@@ -7,6 +7,7 @@ This plugin provides multi-user voice identification capabilities for OVOS.
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+import torch
 from ovos_bus_client.message import Message
 from ovos_plugin_manager.templates.transformers import AudioTransformer
 from ovos_utils.log import LOG
@@ -29,11 +30,24 @@ class OMVAVoiceIDPlugin(AudioTransformer):
 
         LOG.info(f"OMVA Voice ID Plugin v{__version__} initialized")
 
-    def identify_speaker(self, audio_data: bytes) -> Tuple[Optional[str], float]:
+    def identify_speaker(self, signal: torch.Tensor) -> Tuple[Optional[str], float]:
         """Identify speaker from audio data - placeholder implementation"""
         # TODO: Implement actual voice identification
         # For now, return placeholder values
         return "unknown", 0.0
+
+    @staticmethod
+    def audiochunk2array(audio_data):
+        """Convert audio data bytes to a normalized float32 tensor"""
+        # Ensure audio_data is bytes
+        # Convert buffer to float32 using NumPy
+        audio_as_np_int16 = np.frombuffer(audio_data, dtype=np.int16)
+        audio_as_np_float32 = audio_as_np_int16.astype(np.float32)
+
+        # Normalise float32 array so that values are between -1.0 and +1.0
+        max_int16 = 2**15
+        data = audio_as_np_float32 / max_int16
+        return torch.from_numpy(data).float()
 
     def transform(self, audio_data) -> Any:
         """Main AudioTransformer method"""
@@ -47,8 +61,10 @@ class OMVAVoiceIDPlugin(AudioTransformer):
         if len(raw_audio) < 1024:
             return audio_data
 
+        signal = self.audiochunk2array(raw_audio)
+
         # Perform voice identification (placeholder)
-        speaker_id, confidence = self.identify_speaker(raw_audio)
+        speaker_id, confidence = self.identify_speaker(signal)
 
         # Emit identification event
         if self.bus:
