@@ -5,6 +5,7 @@ Unit tests for OMVA Voice Identification Plugin with SpeechBrain integration
 # pylint: disable=import-outside-toplevel
 
 import os
+import shutil
 import unittest
 from unittest.mock import Mock, patch
 
@@ -637,10 +638,42 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         if not os.path.exists(cls.jfk_audio_path):
             raise unittest.SkipTest(f"JFK audio file not found at {cls.jfk_audio_path}")
 
+        # Clean up all cache directories at class setup
+        cache_dirs = [
+            "/tmp/test_speechbrain_integration",
+            "/tmp/test_plugin_integration",
+            "/tmp/test_omva_voiceid",
+            "/tmp/test_same_user_different_audio",
+            "/tmp/test_different_users_identification",
+            "/tmp/test_users_distinguishability",
+        ]
+        for cache_dir in cache_dirs:
+            if os.path.exists(cache_dir):
+                try:
+                    shutil.rmtree(cache_dir)
+                except OSError:
+                    pass  # Ignore if can't delete (might be in use)
+
     def setUp(self):
         """Set up test fixtures"""
         self.jfk_audio = None
         self.jfk_tensor = None
+
+        # Clean up model cache directories before each test to prevent interference
+        cache_dirs = [
+            "/tmp/test_speechbrain_integration",
+            "/tmp/test_plugin_integration",
+            "/tmp/test_omva_voiceid",
+            "/tmp/test_same_user_different_audio",
+            "/tmp/test_different_users_identification",
+            "/tmp/test_users_distinguishability",
+        ]
+        for cache_dir in cache_dirs:
+            if os.path.exists(cache_dir):
+                try:
+                    shutil.rmtree(cache_dir)
+                except OSError:
+                    pass  # Ignore if can't delete (might be in use)
 
     def load_audio(self, audio_path: str) -> torch.Tensor | None:
         """Load audio file as tensor"""
@@ -1053,7 +1086,7 @@ class TestSpeechBrainIntegration(unittest.TestCase):
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
             "confidence_threshold": 0.8,
             "sample_rate": 16000,
-            "model_cache_dir": "/tmp/test_plugin_integration",
+            "model_cache_dir": "/tmp/test_same_user_different_audio",
             "gpu": False,
         }
 
@@ -1133,7 +1166,7 @@ class TestSpeechBrainIntegration(unittest.TestCase):
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
             "confidence_threshold": 0.8,
             "sample_rate": 16000,
-            "model_cache_dir": "/tmp/test_plugin_integration",
+            "model_cache_dir": "/tmp/test_different_users_identification",
             "gpu": False,
         }
 
@@ -1156,3 +1189,93 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         self.assertGreaterEqual(
             confidence, 0.5
         )  # Adjusted for realistic cross-audio performance
+
+    def test_users_distinguishability(self):
+        """Test that the model can distinguish between enrolled user (Obama) and unknown user (JFK)"""
+        try:
+            from ovos_audio_transformer_plugin_omva_voiceid.voice_processor import (
+                OMVAVoiceProcessor,
+            )  # pylint: disable=C0415
+        except ImportError as e:
+            self.skipTest(f"Voice processor not available: {e}")
+
+        # 09 seconds clip - JFK validation (unknown user)
+        jfk_val_tensor = self.load_audio(self.jfk_val_audio_path)
+        # 60 seconds clip - Obama training
+        obama_train_tensor = self.load_audio(self.obama_audio_path)
+        # 41 seconds clip - Obama tuning
+        obama_tune_tensor = self.load_audio(self.obama_tune_audio_path)
+        # 52 seconds clip - Obama validation (enrolled user)
+        obama_val_tensor = self.load_audio(self.obama_val_audio_path)
+
+        self.assertIsNotNone(jfk_val_tensor, "Failed to load JFK val audio")
+        self.assertIsNotNone(obama_train_tensor, "Failed to load Obama train audio")
+        self.assertIsNotNone(obama_tune_tensor, "Failed to load Obama tune audio")
+        self.assertIsNotNone(obama_val_tensor, "Failed to load Obama val audio")
+
+        processor = OMVAVoiceProcessor(self.config)
+
+        if processor.verification_model is None:
+            self.skipTest("SpeechBrain model failed to initialize")
+        if jfk_val_tensor is None:
+            self.skipTest("Failed to load JFK audio")
+        if obama_train_tensor is None or obama_val_tensor is None:
+            self.skipTest("Failed to load Obama audio")
+        if obama_tune_tensor is None:
+            self.skipTest("Failed to load Obama tune audio")
+
+        # Ensure we have enough audio
+        jfk_val_length = jfk_val_tensor.size(0)
+        if jfk_val_length < 96000:  # Need at least 6 seconds
+            self.skipTest("JFK audio too short for testing")
+
+        # Create enrollment samples from Obama training and tune audio only
+        segment_length = 80000  # 5 seconds each for better quality
+
+        # Enroll ONLY Obama using training and tune audio
+        obama_enrollment_samples = []
+        # Slice obama training tensor of 5 seconds each and add to enrollment_samples
+        for i in range(0, obama_train_tensor.size(0), segment_length):
+            obama_enrollment_samples.append(obama_train_tensor[i : i + segment_length])
+        # Slice obama tuning tensor of 5 seconds each and add to enrollment_samples
+        for i in range(0, obama_tune_tensor.size(0), segment_length):
+            obama_enrollment_samples.append(obama_tune_tensor[i : i + segment_length])
+        processor.enroll_user("obama", obama_enrollment_samples)
+
+        # Test plugin initialization and audio processing
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_users_distinguishability",
+            "gpu": False,
+        }
+
+        plugin = OMVAVoiceIDPlugin(config)
+        plugin.voice_processor = processor
+
+        # Test 1: Try to identify JFK (should be unknown - not enrolled)
+        audio_np = (jfk_val_tensor.numpy() * 32767).astype(np.int16)
+        audio_bytes = audio_np.tobytes()
+
+        speaker_id, confidence = plugin.identify_speaker(audio_bytes)
+        self.assertIsInstance(confidence, (float, int))
+        # JFK should NOT be identified since only Obama is enrolled
+        self.assertIsNone(speaker_id, "JFK should not be identified (unknown user)")
+        # Confidence should be low since JFK is not enrolled
+        self.assertLess(
+            confidence, 0.2, "Confidence should be low for unknown user (JFK)"
+        )
+
+        # Test 2: Try to identify Obama (should be correctly identified)
+        audio_np = (obama_val_tensor.numpy() * 32767).astype(np.int16)
+        audio_bytes = audio_np.tobytes()
+
+        speaker_id, confidence = plugin.identify_speaker(audio_bytes)
+        self.assertIsInstance(confidence, (float, int))
+        # Obama should be correctly identified
+        self.assertEqual(speaker_id, "obama", "Obama should be correctly identified")
+        # Confidence should be reasonably high for enrolled user
+        self.assertGreaterEqual(
+            confidence, 0.6, "Confidence should be reasonable for enrolled user (Obama)"
+        )
