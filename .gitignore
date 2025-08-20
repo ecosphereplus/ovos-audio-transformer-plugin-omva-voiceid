@@ -163,3 +163,6 @@ Thumbs.db
 config.ini
 settings.json
 credentials.json
+
+# Temporary files for plugins or extensions
+*.pkl

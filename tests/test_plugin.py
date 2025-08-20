@@ -264,10 +264,10 @@ class TestVoiceProcessor(unittest.TestCase):
             # Expected if dependencies are not installed
             self.skipTest(f"Voice processor dependencies not available: {e}")
 
-    @patch("ovos_audio_transformer_plugin_omva_voiceid.voice_processor.librosa")
-    @patch("ovos_audio_transformer_plugin_omva_voiceid.voice_processor.SVC")
-    @patch("ovos_audio_transformer_plugin_omva_voiceid.voice_processor.StandardScaler")
-    def test_voice_processor_initialization(self, mock_scaler, mock_svc, mock_librosa):
+    # @patch("ovos_audio_transformer_plugin_omva_voiceid.voice_processor.librosa")
+    # @patch("ovos_audio_transformer_plugin_omva_voiceid.voice_processor.SVC")
+    # @patch("ovos_audio_transformer_plugin_omva_voiceid.voice_processor.StandardScaler")
+    def test_voice_processor_initialization(self):
         """Test voice processor initialization"""
         from ovos_audio_transformer_plugin_omva_voiceid.voice_processor import (
             OMVAVoiceProcessor,

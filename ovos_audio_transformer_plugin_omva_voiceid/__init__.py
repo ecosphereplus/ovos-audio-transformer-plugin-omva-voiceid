@@ -13,14 +13,21 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import torch
-from ovos_bus_client import MessageBusClient, Message
+from ovos_bus_client import Message
 from ovos_plugin_manager.templates.transformers import AudioTransformer
 from ovos_utils.log import LOG
 from ovos_utils.xdg_utils import xdg_data_home
 from speech_recognition import AudioData
 
-from .version import VERSION_ALPHA, VERSION_BUILD, VERSION_MAJOR, VERSION_MINOR
-from .voice_processor import OMVAVoiceProcessor
+from ovos_audio_transformer_plugin_omva_voiceid.version import (
+    VERSION_ALPHA,
+    VERSION_BUILD,
+    VERSION_MAJOR,
+    VERSION_MINOR,
+)
+from ovos_audio_transformer_plugin_omva_voiceid.voice_processor import (
+    OMVAVoiceProcessor,
+)
 
 __version__ = f"{VERSION_MAJOR}.{VERSION_MINOR}.{VERSION_BUILD}"
 if VERSION_ALPHA > 0:
@@ -273,7 +280,7 @@ class OMVAVoiceIDPlugin(AudioTransformer):
 
             LOG.info("OMVA Voice ID plugin bound to message bus")
 
-    def handle_get_stats(self, message: Message):
+    def handle_get_stats(self, _: Message):
         """Handle request for plugin statistics"""
         stats_data = {
             **self.processing_stats,
@@ -285,9 +292,10 @@ class OMVAVoiceIDPlugin(AudioTransformer):
             },
         }
 
-        self.bus.emit(Message("ovos.voiceid.stats.response", stats_data))
+        if self.bus:
+            self.bus.emit(Message("ovos.voiceid.stats.response", stats_data))
 
-    def handle_reset_stats(self, message: Message):
+    def handle_reset_stats(self, _: Message):
         """Handle request to reset statistics"""
         self.processing_stats = {
             "total_processed": 0,
@@ -295,8 +303,8 @@ class OMVAVoiceIDPlugin(AudioTransformer):
             "failed_identifications": 0,
             "average_processing_time_ms": 0.0,
         }
-
-        self.bus.emit(Message("ovos.voiceid.stats.reset", {"status": "success"}))
+        if self.bus:
+            self.bus.emit(Message("ovos.voiceid.stats.reset", {"status": "success"}))
         LOG.info("Plugin statistics reset")
 
     def handle_enroll_user(self, message: Message):
@@ -308,33 +316,34 @@ class OMVAVoiceIDPlugin(AudioTransformer):
         LOG.info(f"User enrollment request received for: {user_id}")
         # TODO: Implement enrollment logic
 
-        self.bus.emit(
-            Message(
-                "ovos.voiceid.enroll.response",
-                {
-                    "user_id": user_id,
-                    "status": "not_implemented",
-                    "message": "User enrollment not yet implemented",
-                },
+        if self.bus:
+            self.bus.emit(
+                Message(
+                    "ovos.voiceid.enroll.response",
+                    {
+                        "user_id": user_id,
+                        "status": "not_implemented",
+                        "message": "User enrollment not yet implemented",
+                    },
+                )
             )
-        )
 
-    def handle_list_users(self, message: Message):
+    def handle_list_users(self, _: Message):
         """Handle request to list enrolled users"""
         # Placeholder for user listing functionality
         LOG.info("User list request received")
         # TODO: Implement user listing logic
-
-        self.bus.emit(
-            Message(
-                "ovos.voiceid.users.response",
-                {
-                    "users": [],
-                    "status": "not_implemented",
-                    "message": "User listing not yet implemented",
-                },
+        if self.bus:
+            self.bus.emit(
+                Message(
+                    "ovos.voiceid.users.response",
+                    {
+                        "users": [],
+                        "status": "not_implemented",
+                        "message": "User listing not yet implemented",
+                    },
+                )
             )
-        )
 
     def transform(self, audio_data) -> Any:
         """
@@ -390,5 +399,5 @@ class OMVAVoiceIDPlugin(AudioTransformer):
         """Destructor to ensure cleanup"""
         try:
             self.shutdown()
-        except:
+        except Exception:
             pass  # Ignore cleanup errors during destruction
