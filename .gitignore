@@ -165,4 +165,6 @@ settings.json
 credentials.json
 
 # Temporary files for plugins or extensions
+# Model checkpoints and embeddings
 *.pkl
+*.ckpt
