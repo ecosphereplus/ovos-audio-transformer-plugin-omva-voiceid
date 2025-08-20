@@ -36,9 +36,7 @@ class OMVAVoiceProcessor:
         self.model_source = config.get(
             "model_source", "speechbrain/spkrec-ecapa-voxceleb"
         )
-        self.model_cache_dir = config.get(
-            "model_cache_dir", "./models/speechbrain_cache"
-        )
+        self.model_cache_dir = config.get("model_cache_dir", "/tmp/models/model_cache")
         self.confidence_threshold = config.get("confidence_threshold", 0.8)
         self.sample_rate = config.get("sample_rate", 16000)
         self.gpu = config.get("gpu", False)
