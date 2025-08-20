@@ -18,7 +18,7 @@ class TestOMVAVoiceIDPlugin(unittest.TestCase):
         """Set up test fixtures"""
         self.config = {
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
-            "model_cache_dir": "./test_models",
+            "model_cache_dir": "/tmp/test_models",
             "confidence_threshold": 0.25,
             "enable_enrollment": True,
             "processing_timeout_ms": 200,
