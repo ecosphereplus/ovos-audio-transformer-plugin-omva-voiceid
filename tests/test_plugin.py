@@ -623,6 +623,8 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         cls.jfk_train_audio_path = os.path.join(cls.project_root, "jfk.wav")
         cls.jfk_val_audio_path = os.path.join(cls.project_root, "jfk-val.wav")
         cls.obama_audio_path = os.path.join(cls.project_root, "obama.wav")
+        cls.obama_tune_audio_path = os.path.join(cls.project_root, "obama-tune.wav")
+        cls.obama_val_audio_path = os.path.join(cls.project_root, "obama-val.wav")
         cls.config = {
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
             "confidence_threshold": 0.5,  # Lower threshold for integration tests
@@ -639,6 +641,27 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         """Set up test fixtures"""
         self.jfk_audio = None
         self.jfk_tensor = None
+
+    def load_audio(self, audio_path: str) -> torch.Tensor | None:
+        """Load audio file as tensor"""
+        try:
+            waveform, sample_rate = torchaudio.load(audio_path)
+
+            # Resample if needed
+            if sample_rate != 16000:
+                resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+                waveform = resampler(waveform)
+
+            # Convert to mono if stereo
+            if waveform.size(0) > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+
+            return waveform.squeeze(0)  # Remove channel dimension
+
+        except Exception as e:
+            self.skipTest(f"Failed to load audio: {e}")
+
+        return None
 
     def load_jfk_audio(self) -> torch.Tensor | None:
         """Load JFK audio file as tensor"""
@@ -663,31 +686,51 @@ class TestSpeechBrainIntegration(unittest.TestCase):
                 self.skipTest(f"Failed to load JFK audio: {e}")
 
         return self.jfk_tensor
-    
 
     def load_jfk_train_audio(self) -> torch.Tensor | None:
         """Load JFK audio file as tensor"""
-        if self.jfk_audio is None:
-            try:
-                # Load audio file
-                waveform, sample_rate = torchaudio.load(self.jfk_audio_path)
+        try:
+            # Load audio file
+            waveform, sample_rate = torchaudio.load(self.jfk_train_audio_path)
 
-                # Resample if needed
-                if sample_rate != 16000:
-                    resampler = torchaudio.transforms.Resample(sample_rate, 16000)
-                    waveform = resampler(waveform)
+            # Resample if needed
+            if sample_rate != 16000:
+                resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+                waveform = resampler(waveform)
 
-                # Convert to mono if stereo
-                if waveform.size(0) > 1:
-                    waveform = torch.mean(waveform, dim=0, keepdim=True)
+            # Convert to mono if stereo
+            if waveform.size(0) > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-                self.jfk_audio = waveform.squeeze(0)  # Remove channel dimension
-                self.jfk_tensor = self.jfk_audio
+            return waveform.squeeze(0)  # Remove channel dimension
 
-            except Exception as e:
-                self.skipTest(f"Failed to load JFK audio: {e}")
+        except Exception as e:
+            self.skipTest(f"Failed to load JFK train audio: {e}")
 
-        return self.jfk_tensor
+        return None
+
+    def load_jfk_val_audio(self) -> torch.Tensor | None:
+        """Load JFK audio file as tensor"""
+        try:
+            # Load audio file
+            waveform, sample_rate = torchaudio.load(self.jfk_val_audio_path)
+
+            # Resample if needed
+            if sample_rate != 16000:
+                resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+                waveform = resampler(waveform)
+
+            # Convert to mono if stereo
+            if waveform.size(0) > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+
+            val_audio = waveform.squeeze(0)  # Remove channel dimension
+            val_tensor = val_audio
+
+        except Exception as e:
+            self.skipTest(f"Failed to load JFK audio: {e}")
+
+        return val_tensor
 
     def test_real_embedding_extraction(self):
         """Test embedding extraction with real SpeechBrain model and JFK audio"""
@@ -965,3 +1008,151 @@ class TestSpeechBrainIntegration(unittest.TestCase):
 
         except Exception as e:
             self.skipTest(f"Plugin integration test failed: {e}")
+
+    def test_same_user_different_audio(self):
+        """Test that the same user enrolled with different audio samples can be identified"""
+        try:
+            from ovos_audio_transformer_plugin_omva_voiceid.voice_processor import (
+                OMVAVoiceProcessor,
+            )  # pylint: disable=C0415
+        except ImportError as e:
+            self.skipTest(f"Voice processor not available: {e}")
+
+        jfk_train_tensor = self.load_jfk_train_audio()
+        jfk_val_tensor = self.load_jfk_val_audio()
+        self.assertIsNotNone(jfk_train_tensor, "Failed to load JFK train audio")
+        self.assertIsNotNone(jfk_val_tensor, "Failed to load JFK val audio")
+
+        processor = OMVAVoiceProcessor(self.config)
+
+        if processor.verification_model is None:
+            self.skipTest("SpeechBrain model failed to initialize")
+        if jfk_train_tensor is None or jfk_val_tensor is None:
+            self.skipTest("Failed to load JFK audio")
+
+        # Ensure we have enough audio
+        train_length = jfk_train_tensor.size(0)
+        val_length = jfk_val_tensor.size(0)
+        if train_length < 96000 or val_length < 96000:  # Need at least 6 seconds
+            self.skipTest("JFK audio too short for enrollment testing")
+        # Create enrollment samples from training audio (5 segments of 2 seconds each)
+        segment_length = 32000  # 2 seconds each for better quality
+        enrollment_samples = [
+            jfk_train_tensor[i : i + segment_length]
+            for i in range(
+                0, min(96000, jfk_train_tensor.size(0)), segment_length
+            )  # Use first 10 seconds
+        ][:5]
+        processor.enroll_user("jfk", enrollment_samples)
+
+        audio_np = (jfk_val_tensor.numpy() * 32767).astype(np.int16)
+        audio_bytes = audio_np.tobytes()
+
+        # Test plugin initialization and audio processing
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_plugin_integration",
+            "gpu": False,
+        }
+
+        plugin = OMVAVoiceIDPlugin(config)
+        plugin.voice_processor = processor
+
+        speaker_id, confidence = plugin.identify_speaker(audio_bytes)
+        self.assertIsInstance(confidence, (float, int))
+        self.assertEqual(speaker_id, "jfk")
+        self.assertGreaterEqual(
+            confidence, 0.5
+        )  # Adjusted for realistic cross-audio performance
+
+    def test_different_users_identification(self):
+        """Test that different users can be enrolled and identified correctly"""
+        try:
+            from ovos_audio_transformer_plugin_omva_voiceid.voice_processor import (
+                OMVAVoiceProcessor,
+            )  # pylint: disable=C0415
+        except ImportError as e:
+            self.skipTest(f"Voice processor not available: {e}")
+
+        # 11 seconds clip
+        jfk_train_tensor = self.load_audio(self.jfk_train_audio_path)
+        # 09 seconds clip
+        jfk_val_tensor = self.load_audio(self.jfk_val_audio_path)
+        # 60 seconds clip
+        obama_train_tensor = self.load_audio(self.obama_audio_path)
+        # 41 seconds clip
+        obama_tune_tensor = self.load_audio(self.obama_tune_audio_path)
+        # 52 seconds clip
+        obama_val_tensor = self.load_audio(self.obama_val_audio_path)
+        self.assertIsNotNone(jfk_train_tensor, "Failed to load JFK train audio")
+        self.assertIsNotNone(jfk_val_tensor, "Failed to load JFK val audio")
+        self.assertIsNotNone(obama_train_tensor, "Failed to load Obama train audio")
+        self.assertIsNotNone(obama_tune_tensor, "Failed to load Obama tune audio")
+        self.assertIsNotNone(obama_val_tensor, "Failed to load Obama val audio")
+
+        processor = OMVAVoiceProcessor(self.config)
+
+        if processor.verification_model is None:
+            self.skipTest("SpeechBrain model failed to initialize")
+        if jfk_train_tensor is None or jfk_val_tensor is None:
+            self.skipTest("Failed to load JFK audio")
+        if obama_train_tensor is None or obama_val_tensor is None:
+            self.skipTest("Failed to load Obama audio")
+        if obama_tune_tensor is None:
+            self.skipTest("Failed to load Obama tune audio")
+
+        # Ensure we have enough audio
+        train_length = jfk_train_tensor.size(0)
+        val_length = jfk_val_tensor.size(0)
+        if train_length < 96000 or val_length < 96000:  # Need at least 6 seconds
+            self.skipTest("JFK audio too short for enrollment testing")
+        # Create enrollment samples from training audio, max available of 5 seconds each.
+        segment_length = 80000  # 5 seconds each for better quality
+        enrollment_samples = []
+        # Slice jfk training tensor of 5 seconds each and add to enrollment_samples
+        for i in range(0, jfk_train_tensor.size(0), segment_length):
+            enrollment_samples.append(jfk_train_tensor[i : i + segment_length])
+        processor.enroll_user("jfk", enrollment_samples)
+
+        enrollment_samples = []
+        # Slice obama training tensor of 5 seconds each and add to enrollment_samples
+        for i in range(0, obama_train_tensor.size(0), segment_length):
+            enrollment_samples.append(obama_train_tensor[i : i + segment_length])
+        # Slice obama tuning tensor of 5 seconds each and add to enrollment_samples
+        for i in range(0, obama_tune_tensor.size(0), segment_length):
+            enrollment_samples.append(obama_tune_tensor[i : i + segment_length])
+        processor.enroll_user("obama", enrollment_samples)
+
+        audio_np = (jfk_val_tensor.numpy() * 32767).astype(np.int16)
+        audio_bytes = audio_np.tobytes()
+
+        # Test plugin initialization and audio processing
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_plugin_integration",
+            "gpu": False,
+        }
+
+        plugin = OMVAVoiceIDPlugin(config)
+        plugin.voice_processor = processor
+
+        speaker_id, confidence = plugin.identify_speaker(audio_bytes)
+        self.assertIsInstance(confidence, (float, int))
+        self.assertEqual(speaker_id, "jfk")
+        self.assertGreaterEqual(
+            confidence, 0.5
+        )  # Adjusted for realistic cross-audio performance
+
+        audio_np = (obama_val_tensor.numpy() * 32767).astype(np.int16)
+        audio_bytes = audio_np.tobytes()
+
+        speaker_id, confidence = plugin.identify_speaker(audio_bytes)
+        self.assertIsInstance(confidence, (float, int))
+        self.assertEqual(speaker_id, "obama")
+        self.assertGreaterEqual(
+            confidence, 0.5
+        )  # Adjusted for realistic cross-audio performance
