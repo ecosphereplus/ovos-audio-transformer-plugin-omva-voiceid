@@ -33,11 +33,13 @@ class OMVAVoiceProcessor:
         self.config = config
 
         # Model configuration
-        self.model_source = config.get("model", "speechbrain/spkrec-ecapa-voxceleb")
+        self.model_source = config.get(
+            "model_source", "speechbrain/spkrec-ecapa-voxceleb"
+        )
         self.model_cache_dir = config.get(
             "model_cache_dir", "./models/speechbrain_cache"
         )
-        self.verification_threshold = config.get("verification_threshold", 0.25)
+        self.confidence_threshold = config.get("confidence_threshold", 0.8)
         self.sample_rate = config.get("sample_rate", 16000)
         self.gpu = config.get("gpu", False)
 
@@ -215,14 +217,14 @@ class OMVAVoiceProcessor:
                     best_user = user_id
 
             # Check if best score meets threshold
-            if best_score >= self.verification_threshold:
+            if best_score >= self.confidence_threshold:
                 LOG.info(
                     f"Speaker identified: {best_user} (confidence: {best_score:.3f})"
                 )
                 return best_user, best_score
             else:
                 LOG.debug(
-                    f"No confident match found (best: {best_score:.3f} < {self.verification_threshold})"
+                    f"No confident match found (best: {best_score:.3f} < {self.confidence_threshold})"
                 )
                 return None, best_score
 
@@ -317,7 +319,7 @@ class OMVAVoiceProcessor:
             "model_available": self.verification_model is not None,
             "enrolled_users": len(self.user_embeddings),
             "users": list(self.user_embeddings.keys()),
-            "verification_threshold": self.verification_threshold,
+            "confidence_threshold": self.confidence_threshold,
             "sample_rate": self.sample_rate,
             "model_cache_dir": self.model_cache_dir,
         }
@@ -353,7 +355,7 @@ class OMVAVoiceProcessor:
 
             score = self.similarity(emb1_norm, emb2_norm)
 
-            is_same = score >= self.verification_threshold
+            is_same = score >= self.confidence_threshold
 
             LOG.debug(
                 f"Speaker verification: similarity={score:.3f}, same_speaker={is_same}"

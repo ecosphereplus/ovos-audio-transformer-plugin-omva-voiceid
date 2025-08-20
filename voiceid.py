@@ -18,7 +18,7 @@ try:
     config = {
         "model_source": "speechbrain/spkrec-ecapa-voxceleb",
         "model_cache_dir": "./test_models",
-        "verification_threshold": 0.25,
+        "confidence_threshold": 0.25,
         "sample_rate": 16000,
     }
 
@@ -28,9 +28,7 @@ try:
     AUDIO_BYTES = np.random.randint(-1000, 1000, size=8000, dtype=np.int16).tobytes()
     audio_tensor = OMVAVoiceIDPlugin.audiochunk2array(AUDIO_BYTES)
 
-    print(
-        f"✓ Audio tensor conversion: {audio_tensor.shape}, dtype: {audio_tensor.dtype}"
-    )
+    print(f"✓ Tensor: {audio_tensor.shape}, dtype: {audio_tensor.dtype}")
 
     # Test voice processor initialization (will attempt to load SpeechBrain model)
     try:
@@ -61,9 +59,6 @@ try:
         print("This is expected without SpeechBrain dependencies installed")
 
     print("\n🎉 SpeechBrain voice identification class implementation complete!")
-    print(
-        "To test fully, install dependencies: pip install speechbrain torch torchaudio"
-    )
 
 except ImportError as e:
     print(f"❌ Import error: {e}")

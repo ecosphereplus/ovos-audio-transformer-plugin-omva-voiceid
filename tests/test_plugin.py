@@ -17,14 +17,12 @@ class TestOMVAVoiceIDPlugin(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "model_cache_dir": "./test_models",
             "confidence_threshold": 0.25,
             "enable_enrollment": True,
             "processing_timeout_ms": 200,
-            "voice_processing": {
-                "sample_rate": 16000,
-                "model_source": "speechbrain/spkrec-ecapa-voxceleb",
-                "verification_threshold": 0.25,
-            },
+            "sample_rate": 16000,
         }
 
     @patch("ovos_audio_transformer_plugin_omva_voiceid.OMVAVoiceProcessor")
@@ -40,6 +38,7 @@ class TestOMVAVoiceIDPlugin(unittest.TestCase):
 
         plugin = OMVAVoiceIDPlugin(self.config)
 
+        # Check that the plugin was initialized with correct values
         self.assertEqual(plugin.confidence_threshold, 0.25)
         self.assertTrue(plugin.enable_enrollment)
         self.assertEqual(plugin.processing_timeout_ms, 200)
@@ -169,9 +168,9 @@ class TestOMVAVoiceIDPlugin(unittest.TestCase):
         """Test transform with unknown speaker (low confidence)"""
         mock_processor = Mock()
         mock_processor.identify_speaker.return_value = (
-            "john_doe",
-            0.3,
-        )  # Low confidence
+            None,
+            0.2,
+        )  # Low confidence, no speaker identified
         mock_processor_class.return_value = mock_processor
 
         plugin = OMVAVoiceIDPlugin(self.config)
@@ -245,31 +244,25 @@ class TestVoiceProcessor(unittest.TestCase):
         """Set up test fixtures"""
         self.config = {
             "sample_rate": 16000,
-            "mfcc_coefficients": 13,
-            "window_size": 0.025,
-            "hop_length": 0.01,
-            "cache_dir": "/tmp/test_omva_voiceid",
+            "model_cache_dir": "/tmp/test_omva_voiceid",
         }
 
     def test_voice_processor_import(self):
         """Test that voice processor can be imported"""
         try:
-            from ovos_audio_transformer_plugin_omva_voiceid.voice_processor import (
+            from ovos_audio_transformer_plugin_omva_voiceid.voice_processor import (  # pylint: disable=C0415,W0611
                 OMVAVoiceProcessor,
             )
 
             # If we get here, import succeeded
-            self.assertTrue(True)
+            self.assertTrue(True)  # pylint: disable=W1503
         except ImportError as e:
             # Expected if dependencies are not installed
             self.skipTest(f"Voice processor dependencies not available: {e}")
 
-    # @patch("ovos_audio_transformer_plugin_omva_voiceid.voice_processor.librosa")
-    # @patch("ovos_audio_transformer_plugin_omva_voiceid.voice_processor.SVC")
-    # @patch("ovos_audio_transformer_plugin_omva_voiceid.voice_processor.StandardScaler")
     def test_voice_processor_initialization(self):
         """Test voice processor initialization"""
-        from ovos_audio_transformer_plugin_omva_voiceid.voice_processor import (
+        from ovos_audio_transformer_plugin_omva_voiceid.voice_processor import (  # pylint: disable=C0415,W0611
             OMVAVoiceProcessor,
         )
 

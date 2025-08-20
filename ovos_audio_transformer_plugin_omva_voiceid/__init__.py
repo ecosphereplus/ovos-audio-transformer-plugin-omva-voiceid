@@ -65,24 +65,14 @@ class OMVAVoiceIDPlugin(AudioTransformer):
         # Plugin configuration
         self.confidence_threshold = self.config.get("confidence_threshold", 0.8)
         self.enable_enrollment = self.config.get("enable_enrollment", True)
-        self.cache_dir = (
-            self.config.get("cache_dir") or f"{xdg_data_home()}/omva_voiceid"
-        )
         self.processing_timeout_ms = self.config.get("processing_timeout_ms", 100)
-
-        # Voice processing configuration
-        voice_config = self.config.get("voice_processing", {})
-        self.mfcc_coefficients = voice_config.get("mfcc_coefficients", 13)
-        self.window_size = voice_config.get("window_size", 0.025)
-        self.hop_length = voice_config.get("hop_length", 0.01)
-        self.sample_rate = voice_config.get("sample_rate", 16000)
 
         # Model configuration
         self.model_source = config.get("model", "speechbrain/spkrec-ecapa-voxceleb")
         self.model_cache_dir = config.get(
-            "model_cache_dir", "./models/speechbrain_cache"
+            "model_cache_dir", f"{xdg_data_home()}/omva_voiceid"
         )
-        self.verification_threshold = config.get("verification_threshold", 0.25)
+        self.confidence_threshold = config.get("confidence_threshold", 0.8)
         self.sample_rate = config.get("sample_rate", 16000)
         self.gpu = config.get("gpu", False)
 
@@ -101,22 +91,18 @@ class OMVAVoiceIDPlugin(AudioTransformer):
         LOG.info(f"OMVA Voice ID Plugin v{__version__} initialized")
         LOG.info(
             f"Configuration: threshold={self.confidence_threshold}, "
-            f"cache_dir={self.cache_dir}"
+            f"model_cache_dir={self.model_cache_dir}"
         )
 
     def _initialize_voice_processor(self):
         """Initialize the OMVA voice processing components"""
         try:
             processor_config = {
-                "mfcc_coefficients": self.mfcc_coefficients,
-                "window_size": self.window_size,
-                "hop_length": self.hop_length,
                 "sample_rate": self.sample_rate,
-                "cache_dir": self.cache_dir,
                 "model_source": self.model_source,
                 "model_cache_dir": self.model_cache_dir,
-                "verification_threshold": self.verification_threshold,
-                "use_gpu": self.gpu,
+                "confidence_threshold": self.confidence_threshold,
+                "gpu": self.gpu,
             }
 
             self.voice_processor = OMVAVoiceProcessor(processor_config)
@@ -224,8 +210,8 @@ class OMVAVoiceIDPlugin(AudioTransformer):
         if not self.bus:
             return
 
-        if speaker_id and confidence >= self.confidence_threshold:
-            # Successful identification
+        if speaker_id:
+            # Successful identification (voice processor already checked threshold)
             event_data = {
                 "speaker_id": speaker_id,
                 "confidence": confidence,
@@ -240,7 +226,7 @@ class OMVAVoiceIDPlugin(AudioTransformer):
             LOG.info(f"Speaker identified: {speaker_id} (confidence: {confidence:.3f})")
 
         else:
-            # Failed or low-confidence identification
+            # Failed identification
             event_data = {
                 "confidence": confidence,
                 "speaker_candidates": [],  # Could be populated with top candidates
@@ -248,12 +234,6 @@ class OMVAVoiceIDPlugin(AudioTransformer):
                 "plugin_version": __version__,
                 "timestamp": time.time(),
             }
-
-            if speaker_id:
-                # Low confidence but had a candidate
-                event_data["speaker_candidates"] = [
-                    {"speaker_id": speaker_id, "confidence": confidence}
-                ]
 
             self.bus.emit(Message("ovos.voice.unknown", event_data))
             LOG.debug(
