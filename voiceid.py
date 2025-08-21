@@ -17,7 +17,7 @@ try:
     # Test basic configuration
     config = {
         "model_source": "speechbrain/spkrec-ecapa-voxceleb",
-        "model_cache_dir": "/tmp/test_models",
+        "model_cache_dir": "/tmp/omva_voiceid_models",
         "confidence_threshold": 0.25,
         "sample_rate": 16000,
     }
