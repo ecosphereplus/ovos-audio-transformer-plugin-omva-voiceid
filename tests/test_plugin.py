@@ -4,6 +4,7 @@ Unit tests for OMVA Voice Identification Plugin with SpeechBrain integration
 
 # pylint: disable=import-outside-toplevel
 
+import glob
 import os
 import shutil
 import unittest
@@ -16,14 +17,39 @@ import torchaudio
 from ovos_audio_transformer_plugin_omva_voiceid import OMVAVoiceIDPlugin
 
 
+def cleanup_test_cache_directories():
+    """Clean up all test_voiceid* cache directories to prevent test interference"""
+    # Find all directories matching the pattern
+    cache_patterns = [
+        "/tmp/test_voiceid*",
+        "/tmp/test_speechbrain_integration*",
+        "/tmp/test_plugin_integration*",
+        "/tmp/test_omva_voiceid*",
+        "/tmp/test_same_user_different_audio*",
+        "/tmp/test_different_users_identification*",
+        "/tmp/test_users_distinguishability*",
+    ]
+
+    for pattern in cache_patterns:
+        for cache_dir in glob.glob(pattern):
+            if os.path.exists(cache_dir) and os.path.isdir(cache_dir):
+                try:
+                    shutil.rmtree(cache_dir)
+                except OSError:
+                    pass  # Ignore if can't delete (might be in use)
+
+
 class TestOMVAVoiceIDPlugin(unittest.TestCase):
     """Test cases for the main plugin class"""
 
     def setUp(self):
         """Set up test fixtures"""
+        # Clean up all test cache directories before each test
+        cleanup_test_cache_directories()
+
         self.config = {
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
-            "model_cache_dir": "/tmp/test_models",
+            "model_cache_dir": "/tmp/test_voiceid_models",
             "confidence_threshold": 0.25,
             "enable_enrollment": True,
             "processing_timeout_ms": 200,
@@ -247,11 +273,14 @@ class TestVoiceProcessor(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        # Clean up all test cache directories before each test
+        cleanup_test_cache_directories()
+
         self.config = {
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
             "confidence_threshold": 0.25,
             "sample_rate": 16000,
-            "model_cache_dir": "/tmp/test_omva_voiceid",
+            "model_cache_dir": "/tmp/test_voiceid_omva_voiceid",
             "gpu": False,
         }
 
@@ -280,14 +309,23 @@ class TestVoiceProcessor(unittest.TestCase):
         # Mock the SpeechBrain model
         mock_model = Mock()
         mock_speaker_recognition.from_hparams.return_value = mock_model
-
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_voice_processor_initialization",
+            "gpu": False,
+        }
+        processor = OMVAVoiceProcessor(config)
 
         # Check configuration was set correctly
         self.assertEqual(processor.sample_rate, 16000)
-        self.assertEqual(processor.confidence_threshold, 0.25)
+        self.assertEqual(processor.confidence_threshold, 0.8)
         self.assertEqual(processor.model_source, "speechbrain/spkrec-ecapa-voxceleb")
-        self.assertEqual(processor.model_cache_dir, "/tmp/test_omva_voiceid")
+        self.assertEqual(
+            processor.model_cache_dir,
+            "/tmp/test_voiceid_voice_processor_initialization",
+        )
         self.assertFalse(processor.gpu)
 
         # Check model initialization was called
@@ -307,8 +345,14 @@ class TestVoiceProcessor(unittest.TestCase):
         mock_embedding = torch.randn(192)  # Typical ECAPA-TDNN embedding size
         mock_model.encode_batch.return_value = mock_embedding.unsqueeze(0)
         mock_speaker_recognition.from_hparams.return_value = mock_model
-
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_extract_embedding_success",
+            "gpu": False,
+        }
+        processor = OMVAVoiceProcessor(config)
 
         # Test with audio tensor
         test_audio = torch.randn(16000)  # 1 second of audio
@@ -331,8 +375,14 @@ class TestVoiceProcessor(unittest.TestCase):
         mock_speaker_recognition.from_hparams.side_effect = Exception(
             "Model loading failed"
         )
-
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_extract_embedding_no_model",
+            "gpu": False,
+        }
+        processor = OMVAVoiceProcessor(config)
 
         # Should have None model due to exception
         self.assertIsNone(processor.verification_model)
@@ -354,8 +404,14 @@ class TestVoiceProcessor(unittest.TestCase):
 
         mock_model = Mock()
         mock_speaker_recognition.from_hparams.return_value = mock_model
-
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_identify_speaker_no_users",
+            "gpu": False,
+        }
+        processor = OMVAVoiceProcessor(config)
 
         test_audio = torch.randn(16000)
         speaker_id, confidence = processor.identify_speaker(test_audio)
@@ -377,8 +433,14 @@ class TestVoiceProcessor(unittest.TestCase):
         mock_embedding = torch.randn(192)
         mock_model.encode_batch.return_value = mock_embedding.unsqueeze(0)
         mock_speaker_recognition.from_hparams.return_value = mock_model
-
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_identify_speaker_with_users",
+            "gpu": False,
+        }
+        processor = OMVAVoiceProcessor(config)
 
         # Add a mock user embedding (high similarity)
         user_embedding = torch.randn(192)
@@ -410,7 +472,15 @@ class TestVoiceProcessor(unittest.TestCase):
         mock_model.encode_batch.return_value = mock_embedding.unsqueeze(0)
         mock_speaker_recognition.from_hparams.return_value = mock_model
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_enroll_user_success",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         # Test enrollment with multiple samples
         audio_samples = [torch.randn(16000), torch.randn(16000), torch.randn(16000)]
@@ -432,7 +502,15 @@ class TestVoiceProcessor(unittest.TestCase):
         mock_model = Mock()
         mock_speaker_recognition.from_hparams.return_value = mock_model
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_enroll_user_no_samples",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         # Test enrollment with empty samples
         result = processor.enroll_user("test_user", [])
@@ -452,7 +530,15 @@ class TestVoiceProcessor(unittest.TestCase):
         mock_model = Mock()
         mock_speaker_recognition.from_hparams.return_value = mock_model
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_remove_user",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         # Add a user manually
         processor.user_embeddings["test_user"] = torch.randn(192).numpy()
@@ -485,7 +571,15 @@ class TestVoiceProcessor(unittest.TestCase):
         ]
         mock_speaker_recognition.from_hparams.return_value = mock_model
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_verify_speakers",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         audio1 = torch.randn(16000)
         audio2 = torch.randn(16000)
@@ -508,7 +602,15 @@ class TestVoiceProcessor(unittest.TestCase):
         mock_model = Mock()
         mock_speaker_recognition.from_hparams.return_value = mock_model
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_get_model_info",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         # Add a test user
         processor.user_embeddings["test_user"] = torch.randn(192).numpy()
@@ -535,7 +637,15 @@ class TestVoiceProcessor(unittest.TestCase):
         mock_model = Mock()
         mock_speaker_recognition.from_hparams.return_value = mock_model
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_prepare_audio_tensor",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         # Test short audio (should be padded)
         short_audio = torch.randn(8000)  # 0.5 seconds
@@ -630,7 +740,7 @@ class TestSpeechBrainIntegration(unittest.TestCase):
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
             "confidence_threshold": 0.5,  # Lower threshold for integration tests
             "sample_rate": 16000,
-            "model_cache_dir": "/tmp/test_speechbrain_integration",
+            "model_cache_dir": "/tmp/test_voiceid_speechbrain_integration",
             "gpu": False,
         }
 
@@ -639,41 +749,15 @@ class TestSpeechBrainIntegration(unittest.TestCase):
             raise unittest.SkipTest(f"JFK audio file not found at {cls.jfk_audio_path}")
 
         # Clean up all cache directories at class setup
-        cache_dirs = [
-            "/tmp/test_speechbrain_integration",
-            "/tmp/test_plugin_integration",
-            "/tmp/test_omva_voiceid",
-            "/tmp/test_same_user_different_audio",
-            "/tmp/test_different_users_identification",
-            "/tmp/test_users_distinguishability",
-        ]
-        for cache_dir in cache_dirs:
-            if os.path.exists(cache_dir):
-                try:
-                    shutil.rmtree(cache_dir)
-                except OSError:
-                    pass  # Ignore if can't delete (might be in use)
+        cleanup_test_cache_directories()
 
     def setUp(self):
         """Set up test fixtures"""
+        # Clean up all test cache directories before each test to prevent interference
+        cleanup_test_cache_directories()
+
         self.jfk_audio = None
         self.jfk_tensor = None
-
-        # Clean up model cache directories before each test to prevent interference
-        cache_dirs = [
-            "/tmp/test_speechbrain_integration",
-            "/tmp/test_plugin_integration",
-            "/tmp/test_omva_voiceid",
-            "/tmp/test_same_user_different_audio",
-            "/tmp/test_different_users_identification",
-            "/tmp/test_users_distinguishability",
-        ]
-        for cache_dir in cache_dirs:
-            if os.path.exists(cache_dir):
-                try:
-                    shutil.rmtree(cache_dir)
-                except OSError:
-                    pass  # Ignore if can't delete (might be in use)
 
     def load_audio(self, audio_path: str) -> torch.Tensor | None:
         """Load audio file as tensor"""
@@ -773,9 +857,15 @@ class TestSpeechBrainIntegration(unittest.TestCase):
 
         jfk_tensor = self.load_jfk_audio()
         self.assertIsNotNone(jfk_tensor, "Failed to load JFK audio")
-
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_real_embedding_extraction",
+            "gpu": False,
+        }
         # Initialize processor with real model
-        processor = OMVAVoiceProcessor(self.config)
+        processor = OMVAVoiceProcessor(config)
 
         # Skip if model failed to load
         if processor.verification_model is None:
@@ -818,7 +908,15 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         if jfk_tensor is None:
             self.skipTest("Failed to load JFK audio")
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_real_speaker_verification_same_person",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         if processor.verification_model is None:
             self.skipTest("SpeechBrain model failed to initialize")
@@ -862,7 +960,15 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         jfk_tensor = self.load_jfk_audio()
         self.assertIsNotNone(jfk_tensor, "Failed to load JFK audio")
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_real_user_enrollment_and_identification",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         if processor.verification_model is None:
             self.skipTest("SpeechBrain model failed to initialize")
@@ -937,7 +1043,15 @@ class TestSpeechBrainIntegration(unittest.TestCase):
 
         jfk_tensor = self.load_jfk_audio()
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_real_model_consistency",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         if processor.verification_model is None:
             self.skipTest("SpeechBrain model failed to initialize")
@@ -980,7 +1094,15 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         jfk_tensor = self.load_jfk_audio()
         self.assertIsNotNone(jfk_tensor, "Failed to load JFK audio")
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.8,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_real_audio_preprocessing",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
         if jfk_tensor is None:
             self.skipTest("Failed to load JFK audio")
         # Test with the raw JFK audio
@@ -1012,7 +1134,7 @@ class TestSpeechBrainIntegration(unittest.TestCase):
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
             "confidence_threshold": 0.8,
             "sample_rate": 16000,
-            "model_cache_dir": "/tmp/test_plugin_integration",
+            "model_cache_dir": "/tmp/test_voiceid_plugin_integration",
             "gpu": False,
         }
 
@@ -1056,7 +1178,15 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         self.assertIsNotNone(jfk_train_tensor, "Failed to load JFK train audio")
         self.assertIsNotNone(jfk_val_tensor, "Failed to load JFK val audio")
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.5,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_same_user_different_audio",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         if processor.verification_model is None:
             self.skipTest("SpeechBrain model failed to initialize")
@@ -1084,9 +1214,9 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         # Test plugin initialization and audio processing
         config = {
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
-            "confidence_threshold": 0.8,
+            "confidence_threshold": 0.5,
             "sample_rate": 16000,
-            "model_cache_dir": "/tmp/test_same_user_different_audio",
+            "model_cache_dir": "/tmp/test_voiceid_same_user_different_audio",
             "gpu": False,
         }
 
@@ -1125,7 +1255,15 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         self.assertIsNotNone(obama_tune_tensor, "Failed to load Obama tune audio")
         self.assertIsNotNone(obama_val_tensor, "Failed to load Obama val audio")
 
-        processor = OMVAVoiceProcessor(self.config)
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.5,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_different_users_identification",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         if processor.verification_model is None:
             self.skipTest("SpeechBrain model failed to initialize")
@@ -1164,9 +1302,9 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         # Test plugin initialization and audio processing
         config = {
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
-            "confidence_threshold": 0.8,
+            "confidence_threshold": 0.5,
             "sample_rate": 16000,
-            "model_cache_dir": "/tmp/test_different_users_identification",
+            "model_cache_dir": "/tmp/test_voiceid_different_users_identification",
             "gpu": False,
         }
 
@@ -1213,7 +1351,16 @@ class TestSpeechBrainIntegration(unittest.TestCase):
         self.assertIsNotNone(obama_tune_tensor, "Failed to load Obama tune audio")
         self.assertIsNotNone(obama_val_tensor, "Failed to load Obama val audio")
 
-        processor = OMVAVoiceProcessor(self.config)
+        # Test plugin initialization and audio processing
+        config = {
+            "model_source": "speechbrain/spkrec-ecapa-voxceleb",
+            "confidence_threshold": 0.5,
+            "sample_rate": 16000,
+            "model_cache_dir": "/tmp/test_voiceid_users_distinguishability",
+            "gpu": False,
+        }
+
+        processor = OMVAVoiceProcessor(config)
 
         if processor.verification_model is None:
             self.skipTest("SpeechBrain model failed to initialize")
@@ -1247,7 +1394,7 @@ class TestSpeechBrainIntegration(unittest.TestCase):
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
             "confidence_threshold": 0.8,
             "sample_rate": 16000,
-            "model_cache_dir": "/tmp/test_users_distinguishability",
+            "model_cache_dir": "/tmp/test_voiceid_users_distinguishability",
             "gpu": False,
         }
 
