@@ -37,7 +37,9 @@ class OMVAVoiceProcessor:
             "model_source", "speechbrain/spkrec-ecapa-voxceleb"
         )
         self.model_cache_dir = config.get("model_cache_dir", "/tmp/models/model_cache")
-        self.confidence_threshold = config.get("confidence_threshold", 0.8)
+        self.confidence_threshold = config.get(
+            "confidence_threshold", 0.55
+        )  # Lowered from 0.6 to 0.55
         self.sample_rate = config.get("sample_rate", 16000)
         self.gpu = config.get("gpu", False)
 
@@ -107,7 +109,7 @@ class OMVAVoiceProcessor:
 
     def _prepare_audio_tensor(self, audio_data: torch.Tensor) -> torch.Tensor:
         """
-        Prepare audio tensor for SpeechBrain processing
+        Prepare audio tensor for SpeechBrain processing with quality enhancements
 
         Args:
             audio_data: Raw audio tensor
@@ -119,17 +121,64 @@ class OMVAVoiceProcessor:
         if audio_data.dim() > 1:
             audio_data = audio_data.squeeze()
 
-        # Ensure minimum length (1 second)
-        min_length = self.sample_rate
+        # Basic audio preprocessing for better quality
+        # Remove DC offset
+        audio_data = audio_data - audio_data.mean()
+
+        # Simple voice activity detection: remove quiet sections
+        # Compute energy-based VAD with safer frame processing
+        frame_size = 512
+        step_size = frame_size // 2
+
+        # Ensure we have enough audio for frame processing
+        if audio_data.size(0) >= frame_size:
+            # Safely unfold the audio into frames
+            num_frames = (audio_data.size(0) - frame_size) // step_size + 1
+            if num_frames > 0:
+                frames = audio_data.unfold(0, frame_size, step_size)
+                frame_energies = frames.pow(2).mean(dim=1)
+
+                # Adaptive threshold based on audio statistics
+                energy_mean = frame_energies.mean()
+                energy_std = frame_energies.std()
+                energy_threshold = (
+                    energy_mean - 0.5 * energy_std
+                )  # Keep frames above this threshold
+
+                # Find speech regions
+                speech_frames = frame_energies > energy_threshold
+                if speech_frames.sum() > 0:
+                    # Extract continuous speech segments
+                    speech_indices = torch.nonzero(speech_frames).squeeze()
+                    if speech_indices.numel() > 0:
+                        if speech_indices.dim() == 0:
+                            speech_indices = speech_indices.unsqueeze(0)
+                        start_frame = speech_indices[0].item() * step_size
+                        end_frame = min(
+                            len(audio_data),
+                            (speech_indices[-1].item() + 1) * step_size + frame_size,
+                        )
+                        audio_data = audio_data[start_frame:end_frame]
+
+        # Ensure minimum length (3 seconds for better quality - was 1 second)
+        min_length = self.sample_rate * 3  # Increased from 1 to 3 seconds
         if audio_data.size(0) < min_length:
             # Pad with zeros if too short
             padding = min_length - audio_data.size(0)
             audio_data = torch.nn.functional.pad(audio_data, (0, padding))
 
-        # Limit maximum length (10 seconds for memory efficiency)
-        max_length = self.sample_rate * 10
-        if audio_data.size(0) > max_length:
-            audio_data = audio_data[:max_length]
+        # Optimal length (5-8 seconds for best results)
+        optimal_length = self.sample_rate * 6  # 6 seconds
+        if audio_data.size(0) > optimal_length:
+            # Take the middle portion for consistency (avoid start/end artifacts)
+            start_idx = (audio_data.size(0) - optimal_length) // 2
+            audio_data = audio_data[start_idx : start_idx + optimal_length]
+
+        # Normalize audio amplitude for consistent processing
+        if audio_data.abs().max() > 0:
+            audio_data = (
+                audio_data / audio_data.abs().max() * 0.95
+            )  # Leave some headroom
 
         # Add batch dimension if needed
         if audio_data.dim() == 1:
@@ -208,51 +257,143 @@ class OMVAVoiceProcessor:
         best_score = 0.0
 
         try:
-            for user_id, stored_embedding in self.user_embeddings.items():
-                # Compute cosine similarity
-                if isinstance(stored_embedding, np.ndarray):
-                    stored_embedding = torch.from_numpy(stored_embedding)
+            for user_id, user_data in self.user_embeddings.items():
+                # Handle both old format (numpy array) and new format (dict)
+                if isinstance(user_data, dict):
+                    primary_embedding = torch.from_numpy(user_data["primary"])
+                    variant_embeddings = [
+                        torch.from_numpy(var) for var in user_data.get("variants", [])
+                    ]
+                else:
+                    # Legacy format compatibility
+                    primary_embedding = (
+                        torch.from_numpy(user_data)
+                        if isinstance(user_data, np.ndarray)
+                        else user_data
+                    )
+                    variant_embeddings = [primary_embedding]
 
-                # Normalize embeddings for cosine similarity
+                # Normalize query embedding
                 query_norm = torch.nn.functional.normalize(
                     query_embedding.unsqueeze(0), dim=1
                 )
-                stored_norm = torch.nn.functional.normalize(
-                    stored_embedding.unsqueeze(0), dim=1
+
+                scores = []
+
+                # Score against primary embedding
+                primary_norm = torch.nn.functional.normalize(
+                    primary_embedding.unsqueeze(0), dim=1
+                )
+                primary_score = self.similarity(query_norm, primary_norm)
+                if isinstance(primary_score, torch.Tensor):
+                    primary_score = primary_score.item()
+                scores.append(primary_score)
+
+                # Score against variant embeddings for ensemble
+                for variant_embedding in variant_embeddings[:3]:  # Use top 3 variants
+                    variant_norm = torch.nn.functional.normalize(
+                        variant_embedding.unsqueeze(0), dim=1
+                    )
+                    variant_score = self.similarity(query_norm, variant_norm)
+                    if isinstance(variant_score, torch.Tensor):
+                        variant_score = variant_score.item()
+                    scores.append(variant_score)
+
+                # Enhanced scoring: Use best-performing approach
+                if len(scores) > 1:
+                    # Primary embedding gets high weight, but also consider best variant
+                    primary_score = scores[0]
+                    best_variant_score = max(scores[1:]) if scores[1:] else 0
+
+                    # Weight primary heavily but allow best variant to boost
+                    final_score = 0.7 * primary_score + 0.3 * best_variant_score
+
+                    # Bonus if any variant score is very close to primary (consistency)
+                    variant_scores = scores[1:]
+                    if any(abs(vs - primary_score) < 0.1 for vs in variant_scores):
+                        final_score += 0.05  # Small consistency bonus
+                else:
+                    final_score = scores[0]
+
+                LOG.debug(
+                    f"User {user_id}: primary={primary_score:.3f}, final={final_score:.3f}"
                 )
 
-                # Compute similarity score
-                # similarity = torch.nn.functional.cosine_similarity(
-                #     query_norm, stored_norm
-                # ).item()
-
-                similarity = self.similarity(query_norm, stored_norm)
-
-                # Convert to scalar if tensor
-                if isinstance(similarity, torch.Tensor):
-                    similarity = similarity.item()
-
-                LOG.debug(f"Similarity with {user_id}: {similarity:.3f}")
-
-                if similarity > best_score:
-                    best_score = similarity
+                if final_score > best_score:
+                    best_score = final_score
                     best_user = user_id
 
-            # Check if best score meets threshold
-            if best_score >= self.confidence_threshold:
+            # Check if best score meets threshold with adaptive calibration
+            calibrated_score = self._calibrate_confidence(
+                best_score, len(self.user_embeddings)
+            )
+
+            if calibrated_score >= self.confidence_threshold:
                 LOG.info(
-                    f"Speaker identified: {best_user} (confidence: {best_score:.3f})"
+                    f"Speaker identified: {best_user} (raw: {best_score:.3f}, calibrated: {calibrated_score:.3f})"
                 )
-                return best_user, best_score
+                return best_user, calibrated_score
             else:
                 LOG.debug(
-                    f"No confident match found (best: {best_score:.3f} < {self.confidence_threshold})"
+                    f"No confident match found (raw: {best_score:.3f}, calibrated: {calibrated_score:.3f} < {self.confidence_threshold})"
                 )
-                return None, best_score
+                return None, calibrated_score
 
         except Exception as e:
             LOG.error(f"Speaker identification failed: {e}")
             return None, 0.0
+
+    def _calibrate_confidence(self, raw_score: float, num_enrolled_users: int) -> float:
+        """
+        Calibrate confidence scores for better thresholding
+
+        Args:
+            raw_score: Raw similarity score
+            num_enrolled_users: Number of enrolled users
+
+        Returns:
+            Calibrated confidence score
+        """
+        # Base calibration: Apply sigmoid-like scaling to spread scores
+        calibrated = raw_score
+
+        # Multi-user penalty: As more users are enrolled, be more conservative
+        if num_enrolled_users > 1:
+            user_penalty = min(
+                0.05, (num_enrolled_users - 1) * 0.015
+            )  # Reduced penalty
+            calibrated -= user_penalty
+
+        # More balanced thresholding
+        if raw_score > 0.75:
+            # Very high confidence boost
+            calibrated += min(0.2, (raw_score - 0.75) * 1.2)
+        elif raw_score > 0.6:
+            # High confidence moderate boost
+            calibrated += min(0.15, (raw_score - 0.6) * 0.8)
+        elif raw_score > 0.4:
+            # Medium confidence slight boost
+            calibrated += min(0.1, (raw_score - 0.4) * 0.5)
+        elif raw_score < 0.25:
+            # Very low confidence penalty
+            calibrated *= 0.3
+        else:
+            # Low confidence mild penalty
+            calibrated *= 0.7
+
+        # Non-linear scaling to improve separation
+        # Apply sigmoid with gentler scaling
+        import math
+
+        sigmoid_factor = 2.0  # Gentler steepness
+        calibrated = 1.0 / (
+            1.0 + math.exp(-sigmoid_factor * (calibrated - 0.5))
+        )  # Center at 0.5
+
+        # Ensure reasonable bounds
+        calibrated = max(0.0, min(1.0, calibrated))
+
+        return calibrated
 
     def enroll_user(self, user_id: str, audio_samples: List[torch.Tensor]) -> bool:
         """
@@ -286,14 +427,33 @@ class OMVAVoiceProcessor:
                 LOG.error("No valid embeddings extracted from samples")
                 return False
 
-            # Average multiple embeddings for robustness
-            if len(embeddings) > 1:
-                avg_embedding = torch.stack(embeddings).mean(dim=0)
-            else:
-                avg_embedding = embeddings[0]
+            # Enhanced enrollment: Store multiple embeddings instead of just averaging
+            # This allows for better matching against variations in speech
+            if len(embeddings) >= 3:
+                # Use multiple representative embeddings for better coverage
+                embedding_stack = torch.stack(embeddings)
 
-            # Store user embedding
-            self.user_embeddings[user_id] = avg_embedding.cpu().numpy()
+                # Store the centroid (average) as primary
+                avg_embedding = embedding_stack.mean(dim=0)
+
+                # Also store individual embeddings for ensemble matching
+                self.user_embeddings[user_id] = {
+                    "primary": avg_embedding.cpu().numpy(),
+                    "variants": [
+                        emb.cpu().numpy() for emb in embeddings[:5]
+                    ],  # Store up to 5 variants
+                }
+            else:
+                # Fallback for fewer samples
+                if len(embeddings) > 1:
+                    avg_embedding = torch.stack(embeddings).mean(dim=0)
+                else:
+                    avg_embedding = embeddings[0]
+
+                self.user_embeddings[user_id] = {
+                    "primary": avg_embedding.cpu().numpy(),
+                    "variants": [emb.cpu().numpy() for emb in embeddings],
+                }
 
             # Save to database
             self._save_user_database()
