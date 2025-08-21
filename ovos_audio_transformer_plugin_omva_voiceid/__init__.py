@@ -378,6 +378,8 @@ class OMVAVoiceIDPlugin(AudioTransformer):
     def __del__(self):
         """Destructor to ensure cleanup"""
         try:
-            self.shutdown()
+            # Suppress logging during destruction to avoid reentrant call issues
+            if hasattr(self, "voice_processor") and self.voice_processor:
+                self.voice_processor.cleanup()
         except Exception:
-            pass  # Ignore cleanup errors during destruction
+            pass  # Suppress all cleanup errors during destruction

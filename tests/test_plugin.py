@@ -1134,7 +1134,7 @@ class TestSpeechBrainIntegration(unittest.TestCase):
             "model_source": "speechbrain/spkrec-ecapa-voxceleb",
             "confidence_threshold": 0.8,
             "sample_rate": 16000,
-            "model_cache_dir": "/tmp/test_voiceid_plugin_integration",
+            "model_cache_dir": "/tmp/test_voiceid_plugin_with_real_audio",
             "gpu": False,
         }
 

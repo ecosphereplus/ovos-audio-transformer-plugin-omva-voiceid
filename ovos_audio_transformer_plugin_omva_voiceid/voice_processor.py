@@ -96,11 +96,14 @@ class OMVAVoiceProcessor:
     def _save_user_database(self):
         """Save user embeddings database to disk"""
         try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(self.user_db_path), exist_ok=True)
+
             with open(self.user_db_path, "wb") as f:
                 pickle.dump(self.user_embeddings, f)
             LOG.debug("User embeddings database saved")
         except Exception as e:
-            LOG.error(f"Failed to save user database: {e}")
+            LOG.debug(f"Failed to save user database: {e}")  # Changed to debug level
 
     def _prepare_audio_tensor(self, audio_data: torch.Tensor) -> torch.Tensor:
         """
@@ -398,7 +401,9 @@ class OMVAVoiceProcessor:
         try:
             self._save_user_database()
         except Exception as e:
-            LOG.error(f"Failed to save user database during cleanup: {e}")
+            LOG.debug(
+                f"Failed to save user database during cleanup: {e}"
+            )  # Changed to debug level
 
         # Clear model to free memory
         self.verification_model = None
@@ -408,4 +413,4 @@ class OMVAVoiceProcessor:
         try:
             self.cleanup()
         except Exception:
-            pass
+            pass  # Suppress all cleanup errors during destruction
