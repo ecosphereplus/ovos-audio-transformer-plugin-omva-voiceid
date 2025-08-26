@@ -53,6 +53,11 @@ PLUGIN_ENTRY_POINT = (
     "ovos_audio_transformer_plugin_omva_voiceid:OMVAVoiceIDPlugin"
 )
 
+CONFIG_ENTRY_POINT = (
+    "ovos-audio-transformer-plugin-omva-voiceid.config = "
+    "ovos_audio_transformer_plugin_omva_voiceid:OMVAVoiceIDConfig"
+)
+
 setup(
     name="ovos-audio-transformer-plugin-omva-voiceid",
     version=get_version(),
@@ -62,10 +67,15 @@ setup(
         "identification capabilities using the OMVA model."
     ),
     author="OMVA Team",
+    url="https://github.com/ecosphereplus/ovos-audio-transformer-plugin-omva-voiceid",
+    author_email="contact@omva.ai",
     packages=["ovos_audio_transformer_plugin_omva_voiceid"],
     package_data={"": package_files("ovos_audio_transformer_plugin_omva_voiceid")},
     install_requires=required("requirements.txt"),
-    entry_points={"neon.plugin.audio": [PLUGIN_ENTRY_POINT]},
+    entry_points={
+        "opm.transformer.audio": [PLUGIN_ENTRY_POINT],
+        "opm.transformer.audio.config": [CONFIG_ENTRY_POINT],
+    },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "License :: OSI Approved :: Apache Software License",
@@ -73,6 +83,8 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Topic :: Multimedia :: Sound/Audio :: Speech",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
     keywords="ovos plugin audio transformer omva voiceid",
     zip_safe=True,

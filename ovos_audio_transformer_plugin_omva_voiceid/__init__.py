@@ -383,3 +383,15 @@ class OMVAVoiceIDPlugin(AudioTransformer):
                 self.voice_processor.cleanup()
         except Exception:
             pass  # Suppress all cleanup errors during destruction
+
+
+# Default configuration for OMVA Voice ID Plugin
+OMVAVoiceIDConfig = {
+    "model": "speechbrain/spkrec-ecapa-voxceleb",
+    "confidence_threshold": 0.8,
+    "sample_rate": 16000,
+    "gpu": False,
+    "enable_enrollment": True,
+    "processing_timeout_ms": 100,
+    "model_cache_dir": None,  # Will use XDG data home by default
+}
