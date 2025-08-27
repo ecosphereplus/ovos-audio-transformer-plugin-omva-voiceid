@@ -18,7 +18,7 @@ speechbrain>=1.0.0
 # Audio processing
 soundfile>=0.12.1
 resampy>=0.4.2
-SpeechRecognition>=3.10.0
+speechrecognition>=3.10.0
 
 # Utilities
 pyyaml>=6.0

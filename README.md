@@ -1,18 +1,35 @@
 # OMVA Voice Identification Plugin for OVOS
 
-A multi-user voice identification plugin for the OpenVoiceOS ecosystem.
+A multi-user voice identification plugin for the OpenVoiceOS ecosystem that provides real-time speaker identification with advanced confidence calibration.
 
 ## Features
 
-- Real-time speaker identification
+- Real-time speaker identification with enhanced discrimination
+- Advanced confidence calibration system (2.46x discrimination ratio)
 - OVOS AudioTransformer integration
+- Container and standalone service support
 - Message bus event emission
-- Multi-user support
+- Multi-user enrollment system
+- GPU acceleration support
 
 ## Installation
 
+### Standard Installation
+
 ```bash
 pip install -e .
+```
+
+### Standalone Service
+
+The plugin can run as a standalone service:
+
+```bash
+# Using the console script
+ovos-omva-voiceid-listener
+
+# Or direct Python invocation  
+python -m ovos_audio_transformer_plugin_omva_voiceid
 ```
 
 ## Configuration
