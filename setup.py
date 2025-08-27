@@ -75,6 +75,9 @@ setup(
     entry_points={
         "opm.transformer.audio": [PLUGIN_ENTRY_POINT],
         "opm.transformer.audio.config": [CONFIG_ENTRY_POINT],
+        "console_scripts": [
+            "ovos-omva-voiceid-listener=ovos_audio_transformer_plugin_omva_voiceid:launch_cli"
+        ],
     },
     classifiers=[
         "Development Status :: 3 - Alpha",

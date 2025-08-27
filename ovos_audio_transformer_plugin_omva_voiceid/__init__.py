@@ -395,3 +395,46 @@ OMVAVoiceIDConfig = {
     "processing_timeout_ms": 100,
     "model_cache_dir": None,  # Will use XDG data home by default
 }
+
+
+def launch_cli():
+    """
+    Launch the OMVA Voice ID plugin as a standalone service.
+    This enables container/microservice deployment.
+    """
+    from ovos_utils import wait_for_exit_signal
+    from ovos_bus_client.util import get_mycroft_bus
+    from ovos_utils.log import init_service_logger
+
+    init_service_logger("omva-voiceid")
+    LOG.info("Starting OMVA Voice ID standalone service...")
+
+    # Create plugin instance with standalone configuration
+    config = OMVAVoiceIDConfig.copy()
+    config.update(
+        {
+            "confidence_threshold": 0.8,
+            "enable_enrollment": True,
+            "processing_timeout_ms": 100,
+        }
+    )
+
+    plugin = OMVAVoiceIDPlugin(config)
+
+    # Connect to message bus
+    bus = get_mycroft_bus()
+    plugin.bind(bus)
+
+    LOG.info("OMVA Voice ID service ready. Waiting for audio...")
+
+    try:
+        wait_for_exit_signal()  # Wait for Ctrl+C
+    except KeyboardInterrupt:
+        LOG.info("Shutdown signal received")
+    finally:
+        LOG.info("Shutting down OMVA Voice ID service...")
+        plugin.shutdown()
+
+
+if __name__ == "__main__":
+    launch_cli()
