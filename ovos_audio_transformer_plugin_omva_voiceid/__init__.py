@@ -393,7 +393,7 @@ OMVAVoiceIDConfig = {
     "gpu": False,
     "enable_enrollment": True,
     "processing_timeout_ms": 100,
-    "model_cache_dir": None,  # Will use XDG data home by default
+    "model_cache_dir": "/tmp/omva_models",  # Default cache directory
 }
 
 
@@ -405,19 +405,32 @@ def launch_cli():
     from ovos_utils import wait_for_exit_signal
     from ovos_bus_client.util import get_mycroft_bus
     from ovos_utils.log import init_service_logger
+    from ovos_config import Configuration
 
     init_service_logger("omva-voiceid")
     LOG.info("Starting OMVA Voice ID standalone service...")
 
-    # Create plugin instance with standalone configuration
+    # Load configuration from OVOS config system
+    ovos_config = Configuration()
+    plugin_config = ovos_config.get("audio_transformers", {}).get(
+        "ovos-audio-transformer-plugin-omva-voiceid", {}
+    )
+
+    # Create plugin instance with configuration from OVOS
     config = OMVAVoiceIDConfig.copy()
+    config.update(plugin_config)
+
+    # Ensure essential settings
     config.update(
         {
-            "confidence_threshold": 0.8,
-            "enable_enrollment": True,
-            "processing_timeout_ms": 100,
+            "confidence_threshold": config.get("confidence_threshold", 0.8),
+            "enable_enrollment": config.get("enable_enrollment", True),
+            "processing_timeout_ms": config.get("processing_timeout_ms", 100),
         }
     )
+
+    LOG.info(f"Loaded configuration: model_cache_dir={config.get('model_cache_dir')}")
+    LOG.info(f"Configuration keys: {list(config.keys())}")
 
     plugin = OMVAVoiceIDPlugin(config)
 
