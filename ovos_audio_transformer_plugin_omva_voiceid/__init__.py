@@ -257,6 +257,10 @@ class OMVAVoiceIDPlugin(AudioTransformer):
             if self.enable_enrollment:
                 self.bus.on("ovos.voiceid.enroll_user", self.handle_enroll_user)
                 self.bus.on("ovos.voiceid.list_users", self.handle_list_users)
+                self.bus.on("ovos.voiceid.remove_user", self.handle_remove_user)
+                self.bus.on("ovos.voiceid.update_user", self.handle_update_user)
+                self.bus.on("ovos.voiceid.get_user_info", self.handle_get_user_info)
+                self.bus.on("ovos.voiceid.verify_speakers", self.handle_verify_speakers)
 
             LOG.info("OMVA Voice ID plugin bound to message bus")
 
@@ -289,41 +293,590 @@ class OMVAVoiceIDPlugin(AudioTransformer):
 
     def handle_enroll_user(self, message: Message):
         """Handle user enrollment request"""
-        # Placeholder for user enrollment functionality
         user_id = message.data.get("user_id")
         audio_samples = message.data.get("audio_samples", [])
 
         LOG.info(f"User enrollment request received for: {user_id}")
-        # TODO: Implement enrollment logic
 
-        if self.bus:
-            self.bus.emit(
-                Message(
-                    "ovos.voiceid.enroll.response",
-                    {
-                        "user_id": user_id,
-                        "status": "not_implemented",
-                        "message": "User enrollment not yet implemented",
-                    },
+        if not user_id:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.enroll.response",
+                        {
+                            "user_id": None,
+                            "status": "error",
+                            "message": "User ID is required for enrollment",
+                        },
+                    )
                 )
-            )
+            return
+
+        if not audio_samples:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.enroll.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": "Audio samples are required for enrollment",
+                        },
+                    )
+                )
+            return
+
+        if self.voice_processor is None:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.enroll.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": "Voice processor not initialized",
+                        },
+                    )
+                )
+            return
+
+        try:
+            # Convert audio samples from hex strings to tensors
+            audio_tensors = []
+            for sample_hex in audio_samples:
+                if isinstance(sample_hex, str):
+                    # Convert hex string back to bytes, then to audio tensor
+                    audio_bytes = bytes.fromhex(sample_hex)
+                    audio_tensor = self.audiochunk2array(audio_bytes)
+                    audio_tensors.append(audio_tensor)
+                else:
+                    # Assume it's already audio data
+                    if isinstance(sample_hex, bytes):
+                        audio_tensor = self.audiochunk2array(sample_hex)
+                        audio_tensors.append(audio_tensor)
+
+            if not audio_tensors:
+                raise ValueError("No valid audio tensors could be created")
+
+            # Use voice processor to enroll user
+            success = self.voice_processor.enroll_user(user_id, audio_tensors)
+
+            if success:
+                LOG.info(f"User {user_id} enrolled successfully")
+                if self.bus:
+                    self.bus.emit(
+                        Message(
+                            "ovos.voiceid.enroll.response",
+                            {
+                                "user_id": user_id,
+                                "status": "success",
+                                "message": f"User {user_id} enrolled successfully with {len(audio_tensors)} audio samples",
+                                "samples_processed": len(audio_tensors),
+                            },
+                        )
+                    )
+            else:
+                LOG.error(f"Failed to enroll user {user_id}")
+                if self.bus:
+                    self.bus.emit(
+                        Message(
+                            "ovos.voiceid.enroll.response",
+                            {
+                                "user_id": user_id,
+                                "status": "error",
+                                "message": f"Enrollment failed for user {user_id}",
+                            },
+                        )
+                    )
+
+        except Exception as e:
+            LOG.error(f"Enrollment error for user {user_id}: {e}")
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.enroll.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": f"Enrollment failed: {str(e)}",
+                        },
+                    )
+                )
 
     def handle_list_users(self, _: Message):
         """Handle request to list enrolled users"""
-        # Placeholder for user listing functionality
         LOG.info("User list request received")
-        # TODO: Implement user listing logic
-        if self.bus:
-            self.bus.emit(
-                Message(
-                    "ovos.voiceid.users.response",
-                    {
-                        "users": [],
-                        "status": "not_implemented",
-                        "message": "User listing not yet implemented",
-                    },
+
+        if self.voice_processor is None:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.users.response",
+                        {
+                            "users": [],
+                            "status": "error",
+                            "message": "Voice processor not initialized",
+                        },
+                    )
                 )
+            return
+
+        try:
+            # Get enrolled users from voice processor
+            enrolled_users = self.voice_processor.get_enrolled_users()
+
+            # Get additional model information
+            model_info = self.voice_processor.get_model_info()
+
+            LOG.info(f"Retrieved {len(enrolled_users)} enrolled users")
+
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.users.response",
+                        {
+                            "users": enrolled_users,
+                            "status": "success",
+                            "total_users": len(enrolled_users),
+                            "model_info": {
+                                "model_source": model_info.get("model_source"),
+                                "model_available": model_info.get(
+                                    "model_available", False
+                                ),
+                                "confidence_threshold": model_info.get(
+                                    "confidence_threshold"
+                                ),
+                                "sample_rate": model_info.get("sample_rate"),
+                            },
+                            "message": f"Retrieved {len(enrolled_users)} enrolled users",
+                        },
+                    )
+                )
+
+        except Exception as e:
+            LOG.error(f"Failed to retrieve user list: {e}")
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.users.response",
+                        {
+                            "users": [],
+                            "status": "error",
+                            "message": f"Failed to retrieve users: {str(e)}",
+                        },
+                    )
+                )
+
+    def handle_remove_user(self, message: Message):
+        """Handle user removal request"""
+        user_id = message.data.get("user_id")
+
+        LOG.info(f"User removal request received for: {user_id}")
+
+        if not user_id:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.remove.response",
+                        {
+                            "user_id": None,
+                            "status": "error",
+                            "message": "User ID is required for removal",
+                        },
+                    )
+                )
+            return
+
+        if self.voice_processor is None:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.remove.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": "Voice processor not initialized",
+                        },
+                    )
+                )
+            return
+
+        try:
+            # Use voice processor to remove user
+            success = self.voice_processor.remove_user(user_id)
+
+            if success:
+                LOG.info(f"User {user_id} removed successfully")
+                if self.bus:
+                    self.bus.emit(
+                        Message(
+                            "ovos.voiceid.remove.response",
+                            {
+                                "user_id": user_id,
+                                "status": "success",
+                                "message": f"User {user_id} removed successfully",
+                            },
+                        )
+                    )
+            else:
+                LOG.warning(f"User {user_id} not found for removal")
+                if self.bus:
+                    self.bus.emit(
+                        Message(
+                            "ovos.voiceid.remove.response",
+                            {
+                                "user_id": user_id,
+                                "status": "not_found",
+                                "message": f"User {user_id} not found in enrolled users",
+                            },
+                        )
+                    )
+
+        except Exception as e:
+            LOG.error(f"User removal error for {user_id}: {e}")
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.remove.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": f"Removal failed: {str(e)}",
+                        },
+                    )
+                )
+
+    def handle_verify_speakers(self, message: Message):
+        """Handle speaker verification request (comparing two audio samples)"""
+        audio_sample1 = message.data.get("audio_sample1")
+        audio_sample2 = message.data.get("audio_sample2")
+
+        LOG.info("Speaker verification request received")
+
+        if not audio_sample1 or not audio_sample2:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.verify.response",
+                        {
+                            "is_same_speaker": False,
+                            "similarity_score": 0.0,
+                            "status": "error",
+                            "message": "Two audio samples are required for verification",
+                        },
+                    )
+                )
+            return
+
+        if self.voice_processor is None:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.verify.response",
+                        {
+                            "is_same_speaker": False,
+                            "similarity_score": 0.0,
+                            "status": "error",
+                            "message": "Voice processor not initialized",
+                        },
+                    )
+                )
+            return
+
+        try:
+            # Convert audio samples from hex strings to tensors
+            if isinstance(audio_sample1, str):
+                audio_bytes1 = bytes.fromhex(audio_sample1)
+                audio_tensor1 = self.audiochunk2array(audio_bytes1)
+            else:
+                audio_tensor1 = self.audiochunk2array(audio_sample1)
+
+            if isinstance(audio_sample2, str):
+                audio_bytes2 = bytes.fromhex(audio_sample2)
+                audio_tensor2 = self.audiochunk2array(audio_bytes2)
+            else:
+                audio_tensor2 = self.audiochunk2array(audio_sample2)
+
+            # Use voice processor to verify speakers
+            is_same_speaker, similarity_score = self.voice_processor.verify_speakers(
+                audio_tensor1, audio_tensor2
             )
+
+            LOG.info(
+                f"Speaker verification result: same_speaker={is_same_speaker}, score={similarity_score:.3f}"
+            )
+
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.verify.response",
+                        {
+                            "is_same_speaker": is_same_speaker,
+                            "similarity_score": similarity_score,
+                            "status": "success",
+                            "confidence_threshold": self.confidence_threshold,
+                            "message": f"Verification complete: {'Same speaker' if is_same_speaker else 'Different speakers'} (score: {similarity_score:.3f})",
+                        },
+                    )
+                )
+
+        except Exception as e:
+            LOG.error(f"Speaker verification error: {e}")
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.verify.response",
+                        {
+                            "is_same_speaker": False,
+                            "similarity_score": 0.0,
+                            "status": "error",
+                            "message": f"Verification failed: {str(e)}",
+                        },
+                    )
+                )
+
+    def handle_update_user(self, message: Message):
+        """Handle user profile update request (re-enrollment with new samples)"""
+        user_id = message.data.get("user_id")
+        audio_samples = message.data.get("audio_samples", [])
+        update_mode = message.data.get("mode", "replace")  # "replace" or "append"
+
+        LOG.info(f"User update request received for: {user_id} (mode: {update_mode})")
+
+        if not user_id:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.update.response",
+                        {
+                            "user_id": None,
+                            "status": "error",
+                            "message": "User ID is required for update",
+                        },
+                    )
+                )
+            return
+
+        if not audio_samples:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.update.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": "Audio samples are required for update",
+                        },
+                    )
+                )
+            return
+
+        if self.voice_processor is None:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.update.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": "Voice processor not initialized",
+                        },
+                    )
+                )
+            return
+
+        try:
+            # Check if user exists
+            enrolled_users = self.voice_processor.get_enrolled_users()
+            if user_id not in enrolled_users:
+                if self.bus:
+                    self.bus.emit(
+                        Message(
+                            "ovos.voiceid.update.response",
+                            {
+                                "user_id": user_id,
+                                "status": "not_found",
+                                "message": f"User {user_id} not found. Use enrollment instead.",
+                                "suggestion": "Use ovos.voiceid.enroll_user for new users",
+                            },
+                        )
+                    )
+                return
+
+            # Convert audio samples from hex strings to tensors
+            audio_tensors = []
+            for sample_hex in audio_samples:
+                if isinstance(sample_hex, str):
+                    # Convert hex string back to bytes, then to audio tensor
+                    audio_bytes = bytes.fromhex(sample_hex)
+                    audio_tensor = self.audiochunk2array(audio_bytes)
+                    audio_tensors.append(audio_tensor)
+                else:
+                    # Assume it's already audio data
+                    if isinstance(sample_hex, bytes):
+                        audio_tensor = self.audiochunk2array(sample_hex)
+                        audio_tensors.append(audio_tensor)
+
+            if not audio_tensors:
+                raise ValueError("No valid audio tensors could be created")
+
+            # For update, we use re-enrollment with new samples
+            # The voice processor will replace the existing embedding
+            LOG.info(
+                f"Updating user {user_id} with {len(audio_tensors)} new audio samples"
+            )
+
+            # Use voice processor to re-enroll user (this updates the existing profile)
+            success = self.voice_processor.enroll_user(user_id, audio_tensors)
+
+            if success:
+                LOG.info(f"User {user_id} updated successfully")
+                if self.bus:
+                    self.bus.emit(
+                        Message(
+                            "ovos.voiceid.update.response",
+                            {
+                                "user_id": user_id,
+                                "status": "success",
+                                "message": f"User {user_id} profile updated successfully with {len(audio_tensors)} new audio samples",
+                                "samples_processed": len(audio_tensors),
+                                "mode": update_mode,
+                                "previous_profile": "replaced",
+                            },
+                        )
+                    )
+            else:
+                LOG.error(f"Failed to update user {user_id}")
+                if self.bus:
+                    self.bus.emit(
+                        Message(
+                            "ovos.voiceid.update.response",
+                            {
+                                "user_id": user_id,
+                                "status": "error",
+                                "message": f"Profile update failed for user {user_id}",
+                            },
+                        )
+                    )
+
+        except Exception as e:
+            LOG.error(f"User update error for {user_id}: {e}")
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.update.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": f"Update failed: {str(e)}",
+                        },
+                    )
+                )
+
+    def handle_get_user_info(self, message: Message):
+        """Handle request for detailed user information"""
+        user_id = message.data.get("user_id")
+
+        LOG.info(f"User info request received for: {user_id}")
+
+        if not user_id:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.user_info.response",
+                        {
+                            "user_id": None,
+                            "status": "error",
+                            "message": "User ID is required",
+                        },
+                    )
+                )
+            return
+
+        if self.voice_processor is None:
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.user_info.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": "Voice processor not initialized",
+                        },
+                    )
+                )
+            return
+
+        try:
+            # Check if user exists
+            enrolled_users = self.voice_processor.get_enrolled_users()
+
+            if user_id not in enrolled_users:
+                if self.bus:
+                    self.bus.emit(
+                        Message(
+                            "ovos.voiceid.user_info.response",
+                            {
+                                "user_id": user_id,
+                                "status": "not_found",
+                                "message": f"User {user_id} not found in enrolled users",
+                                "available_users": enrolled_users,
+                            },
+                        )
+                    )
+                return
+
+            # Get user information
+            model_info = self.voice_processor.get_model_info()
+
+            user_info = {
+                "user_id": user_id,
+                "is_enrolled": True,
+                "enrollment_date": "unknown",  # Could be enhanced if we track this
+                "model_source": model_info.get("model_source"),
+                "confidence_threshold": model_info.get("confidence_threshold"),
+                "sample_rate": model_info.get("sample_rate"),
+            }
+
+            # Could add more detailed info if available from voice processor
+            if (
+                hasattr(self.voice_processor, "user_embeddings")
+                and user_id in self.voice_processor.user_embeddings
+            ):
+                embedding = self.voice_processor.user_embeddings[user_id]
+                if hasattr(embedding, "shape"):
+                    user_info["embedding_dimensions"] = embedding.shape
+                elif isinstance(embedding, (list, tuple)):
+                    user_info["embedding_dimensions"] = len(embedding)
+
+            LOG.info(f"Retrieved information for user {user_id}")
+
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.user_info.response",
+                        {
+                            "user_id": user_id,
+                            "status": "success",
+                            "user_info": user_info,
+                            "message": f"Information retrieved for user {user_id}",
+                        },
+                    )
+                )
+
+        except Exception as e:
+            LOG.error(f"Failed to get user info for {user_id}: {e}")
+            if self.bus:
+                self.bus.emit(
+                    Message(
+                        "ovos.voiceid.user_info.response",
+                        {
+                            "user_id": user_id,
+                            "status": "error",
+                            "message": f"Failed to retrieve user info: {str(e)}",
+                        },
+                    )
+                )
 
     def transform(self, audio_data) -> Any:
         """
