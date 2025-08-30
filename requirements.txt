@@ -18,6 +18,9 @@ speechbrain>=1.0.0
 # Audio processing
 soundfile>=0.12.1
 resampy>=0.4.2
+
+# Test dependencies (for integration tests)
+# These are needed for the comprehensive integration tests in tests/test_integration.py
 speechrecognition>=3.10.0
 
 # Utilities
